@@ -205,11 +205,31 @@
 
         <div class="field">
           <label for="profitTarget">Desired profit margin
-            <span class="hint">Used to calculate your target ROAS.</span>
+            <span class="hint">Used to calculate your recommended ROAS.</span>
           </label>
           <div class="input-wrap has-suffix">
             <input id="profitTarget" type="number" min="0" step="0.5" value="15">
             <span class="suffix">%</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="monthlySpend">Monthly ad spend
+            <span class="hint">How much you plan to spend on ads each month.</span>
+          </label>
+          <div class="input-wrap has-prefix">
+            <span class="prefix">$</span>
+            <input id="monthlySpend" type="number" min="0" step="1" value="5000">
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="expectedRoas">ROAS you expect
+            <span class="hint">Example: 2.5 means $2.50 revenue per $1 ad spend.</span>
+          </label>
+          <div class="input-wrap has-suffix">
+            <input id="expectedRoas" type="number" min="0" step="0.01" value="2.50">
+            <span class="suffix">x</span>
           </div>
         </div>
       </div>
@@ -248,7 +268,7 @@
         </div>
 
         <div class="result">
-          <div class="k">Target ROAS</div>
+          <div class="k">Recommended ROAS</div>
           <div class="v" id="targetRoas">--</div>
           <div class="s" id="targetRoasText">ROAS needed to keep your desired profit margin.</div>
         </div>
@@ -257,6 +277,23 @@
           <div class="k">Target CPA</div>
           <div class="v" id="targetCpa">--</div>
           <div class="s">Approximate CPA that leaves room for your desired profit margin.</div>
+        </div>
+        <div class="result primary" id="monthlyProfitCard">
+          <div class="k">Projected monthly profit</div>
+          <div class="v" id="monthlyProfit">--</div>
+          <div class="s" id="monthlyProfitText">Based on your monthly ad spend and expected ROAS.</div>
+        </div>
+
+        <div class="result">
+          <div class="k">Projected revenue</div>
+          <div class="v" id="monthlyRevenue">--</div>
+          <div class="s">Revenue attributed to your monthly ad spend.</div>
+        </div>
+
+        <div class="result">
+          <div class="k">Estimated orders</div>
+          <div class="v" id="monthlyOrders">--</div>
+          <div class="s">Estimated paid orders at your current AOV.</div>
         </div>
       </div>
 
@@ -294,6 +331,8 @@
         const feesPct = value("fees") / 100;
         const fixedFee = value("fixedFee");
         const desiredMargin = value("profitTarget") / 100;
+        const monthlySpend = value("monthlySpend");
+        const expectedRoas = value("expectedRoas");
 
         const processing = aov * feesPct + fixedFee;
         const variableCosts = cogs + shipping + processing;
@@ -308,11 +347,42 @@
         const targetRoas = targetAdShare > 0 ? 1 / targetAdShare : NaN;
         const targetCpa = targetAdShare > 0 ? aov * targetAdShare : NaN;
 
+        const monthlyRevenue = monthlySpend * expectedRoas;
+        const monthlyOrders = aov > 0 ? monthlyRevenue / aov : NaN;
+        const monthlyVariableCosts = Number.isFinite(monthlyOrders) ? monthlyOrders * variableCosts : NaN;
+        const monthlyProfit = Number.isFinite(monthlyVariableCosts)
+          ? monthlyRevenue - monthlyVariableCosts - monthlySpend
+          : NaN;
+        const monthlyNetMargin = monthlyRevenue > 0 && Number.isFinite(monthlyProfit)
+          ? monthlyProfit / monthlyRevenue
+          : NaN;
+
         document.getElementById("beRoas").textContent = viable ? roas(breakEvenRoas) : "Not viable";
         document.getElementById("beCpa").textContent = viable ? money(breakEvenCpa) : "--";
         document.getElementById("contributionMargin").textContent = viable ? pct(contributionMargin) : "--";
         document.getElementById("targetRoas").textContent = Number.isFinite(targetRoas) ? roas(targetRoas) : "Not possible";
         document.getElementById("targetCpa").textContent = Number.isFinite(targetCpa) ? money(targetCpa) : "--";
+        document.getElementById("monthlyRevenue").textContent = money(monthlyRevenue);
+        document.getElementById("monthlyOrders").textContent = Number.isFinite(monthlyOrders) ? monthlyOrders.toFixed(0) : "--";
+        document.getElementById("monthlyProfit").textContent = money(monthlyProfit);
+
+        const monthlyProfitText = document.getElementById("monthlyProfitText");
+        if (Number.isFinite(monthlyProfit)) {
+          if (monthlyProfit > 0) {
+            monthlyProfitText.textContent = "At " + roas(expectedRoas) + " on " + money(monthlySpend) + " ad spend, that is about " + pct(monthlyNetMargin) + " profit margin after ads.";
+          } else if (monthlyProfit < 0) {
+            monthlyProfitText.textContent = "At " + roas(expectedRoas) + " on " + money(monthlySpend) + " ad spend, you would lose about " + money(Math.abs(monthlyProfit)) + " for the month.";
+          } else {
+            monthlyProfitText.textContent = "This projection is approximately break-even after ads.";
+          }
+        } else {
+          monthlyProfitText.textContent = "Enter valid store economics to calculate a monthly projection.";
+        }
+
+        const monthlyProfitEl = document.getElementById("monthlyProfit");
+        monthlyProfitEl.style.color = Number.isFinite(monthlyProfit)
+          ? (monthlyProfit > 0 ? "var(--good)" : monthlyProfit < 0 ? "var(--bad)" : "var(--warn)")
+          : "inherit";
 
         const badge = document.getElementById("statusBadge");
         const note = document.getElementById("meaningNote");
@@ -326,7 +396,13 @@
           note.textContent = "Your current product, shipping, and payment costs are equal to or higher than your order revenue. Reduce costs or increase your selling price before paying for customer acquisition.";
           targetText.textContent = "There is no profitable ROAS target with these inputs.";
         } else {
-          badge.textContent = "Ready to scale-test";
+          if (expectedRoas > breakEvenRoas) {
+            badge.textContent = "Projected profitable";
+          } else if (expectedRoas > 0 && expectedRoas < breakEvenRoas) {
+            badge.textContent = "Projected loss";
+          } else {
+            badge.textContent = "Ready to calculate";
+          }
           badge.style.color = "var(--good)";
           badge.style.background = "rgba(45,212,160,.1)";
           badge.style.borderColor = "rgba(45,212,160,.25)";
@@ -335,7 +411,7 @@
             : "Your desired profit margin is higher than your pre-ad contribution margin.";
 
           note.textContent = Number.isFinite(targetRoas)
-            ? "At " + money(aov) + " per order, you have " + money(contribution) + " available before advertising. That gives you a break-even CPA of " + money(breakEvenCpa) + ". For your " + (desiredMargin * 100).toFixed(0) + "% profit goal, aim for about " + roas(targetRoas) + " ROAS or better."
+            ? "Your break-even is " + roas(breakEvenRoas) + ". For a " + (desiredMargin * 100).toFixed(0) + "% profit goal, aim for about " + roas(targetRoas) + " or better. Your current projection uses " + roas(expectedRoas) + " on " + money(monthlySpend) + " monthly ad spend."
             : "You have " + money(contribution) + " available before ads, but your desired profit margin leaves no room for acquisition cost. Lower the profit target, raise price, or reduce variable costs.";
         }
 
